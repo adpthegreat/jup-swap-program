@@ -25,9 +25,9 @@ use jup_swap::{
 };
 use crate::helpers::get_discriminator;
 
-const INPUT_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const INPUT_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 const INPUT_AMOUNT: u64 = 2_000_000;
-const OUTPUT_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+const OUTPUT_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
 const CPI_SWAP_PROGRAM_ID: Pubkey = pubkey!("HALaoXiDUqEvwCLdoxHRvsDmYJQ5djZH7MozvNwMhuGm");
 const JUPITER_V6_AGG_PROGRAM_ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
@@ -58,6 +58,7 @@ async fn main() {
     // GET /quote
     let quote_response = match jupiter_swap_api_client.quote(&quote_request).await {
         Ok(quote_response) => {
+            // println!("Quote received successfully {:?}.", quote_response);
             println!("Quote received successfully.");
             quote_response
         },
@@ -87,6 +88,7 @@ async fn main() {
         .await
         .unwrap();
 
+    println!("response {:?}", response);
     println!("Vault: {}", vault);
     let input_token_account = get_associated_token_address(&vault, &INPUT_MINT);
     let output_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
@@ -128,7 +130,7 @@ async fn main() {
 
     let instruction_data = SwapIxData {
         data: response.swap_instruction.data,
-        amount: 10000 // any amount
+        amount: 10000 // any amount tbh
     };
 
     let mut serialized_data = Vec::from(get_discriminator("global:swap"));
@@ -171,7 +173,10 @@ async fn main() {
 
     //Send the transaction
     let tx = VersionedTransaction::try_new(versioned_msg, &[&payer]).unwrap();
-    svm.send_transaction(tx).unwrap_err();
+    match svm.send_transaction(tx) {
+        Ok(res) => println!("transaction success {:?}", res),
+        Err(res) => println!("transaction failure {:?}", res)
+    };
 }
 
 

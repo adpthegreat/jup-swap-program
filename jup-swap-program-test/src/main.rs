@@ -41,11 +41,13 @@ struct SwapIxData {
 
 #[tokio::main]
 async fn main() {
+    println!("Starting Jupiter Swap...");
     let jup_swap_program_id = Pubkey::new_unique();
     let mut svm = LiteSVM::new();
     let api_base_url = env::var("API_BASE_URL").unwrap_or("https://quote-api.jup.ag/v6".into());
-     let jupiter_swap_api_client = JupiterSwapApiClient::new(api_base_url);
+    let jupiter_swap_api_client = JupiterSwapApiClient::new(api_base_url);
 
+    println!("Fetching quote...");
     let quote_request = QuoteRequest {
         amount: INPUT_AMOUNT,
         input_mint: INPUT_MINT,
@@ -55,7 +57,10 @@ async fn main() {
 
     // GET /quote
     let quote_response = match jupiter_swap_api_client.quote(&quote_request).await {
-        Ok(quote_response) => quote_response,
+        Ok(quote_response) => {
+            println!("Quote received successfully.");
+            quote_response
+        },
         Err(e) => {
             println!("quote failed: {e:#?}");
             return;
@@ -85,20 +90,27 @@ async fn main() {
     println!("Vault: {}", vault);
     let input_token_account = get_associated_token_address(&vault, &INPUT_MINT);
     let output_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
+    println!("Input Token Account: {}", input_token_account);
+    println!("Output Token Account: {}", output_token_account);
 
-    let bytes = include_bytes!("../../jup-swap-program/program_bytes/jup_swap_program.so"); 
+    let bytes = include_bytes!("../../jup-swap-program/target/deploy/jup_swap_program.so"); 
     svm.add_program(CPI_SWAP_PROGRAM_ID, bytes);
 
     svm.add_program_from_file(JUPITER_V6_AGG_PROGRAM_ID, "../../jup-swap-program/program_bytes/jup_agg_v6.so"); //jup agg v6 dump dump with solana program dump command 
 
     let payer = Keypair::new();
     let payer_address = payer.pubkey();
+    println!("Payer Address: {}", payer_address);
 
-    let receiver = Keypair::new();
-    let receiver_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
+    let recipient = Keypair::new();
+    let recipient_address = recipient.pubkey();
+    println!("Recipient Address: {}", recipient_address);
+
+    let recipient_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
 
     svm.airdrop(&payer.pubkey(), 1_000_000_000).unwrap();
     let blockhash = svm.latest_blockhash();
+    println!("Latest Blockhash: {}", blockhash);
 
     let create_output_ata_ix = create_associated_token_account_idempotent(
         &payer_address,
@@ -107,13 +119,21 @@ async fn main() {
         &TOKEN_PROGRAM_ID,
     );
 
+    let create_recipient_ata_ix = create_associated_token_account_idempotent(
+        &payer_address,
+        &recipient_address,
+        &OUTPUT_MINT,
+        &TOKEN_PROGRAM_ID,
+    );
+
     let instruction_data = SwapIxData {
         data: response.swap_instruction.data,
-        amount: 1000 // any amount
+        amount: 10000 // any amount
     };
 
     let mut serialized_data = Vec::from(get_discriminator("global:swap"));
     instruction_data.serialize(&mut serialized_data).unwrap();
+    println!("Serialized Swap Instruction Data: {:?}", serialized_data);
 
     let mut accounts = vec![
         AccountMeta::new_readonly(INPUT_MINT, false), // input mint
@@ -123,6 +143,8 @@ async fn main() {
         AccountMeta::new(vault, false),                     // vault
         AccountMeta::new(input_token_account, false),       // vault input token account
         AccountMeta::new(output_token_account, false),      // vault output token account
+        AccountMeta::new(recipient_token_account, false),    // recipient token account
+        AccountMeta::new(recipient_address, false),                  // recipient 
         AccountMeta::new_readonly(JUPITER_V6_AGG_PROGRAM_ID, false), // jupiter program
     ];
     //Add the addtional accounts from the response 
@@ -134,6 +156,8 @@ async fn main() {
 
     //Create the instruction
     let ixs = [
+        create_output_ata_ix,
+        create_recipient_ata_ix,
         Instruction {
             program_id: CPI_SWAP_PROGRAM_ID,
             data: serialized_data,

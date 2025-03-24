@@ -24,6 +24,7 @@ pub mod jup_swap_program {
         //validate jupiter program id
         require_keys_eq!(*ctx.accounts.jupiter_program.key, jupiter_program_id());
 
+        //Convert the reamaining accounts gotten from the jupiter swap api to Account Meta Objects
         let accounts: Vec<AccountMeta> = ctx
             .remaining_accounts
             .iter()
@@ -37,6 +38,7 @@ pub mod jup_swap_program {
             })
             .collect();
         
+        //Convert the remaining accounts to account infos
         let accounts_infos: Vec<AccountInfo> = ctx
             .remaining_accounts
             .iter()
@@ -46,6 +48,7 @@ pub mod jup_swap_program {
         //PDA signer seeds for the vault 
         let signer_seeds: &[&[&[u8]]] = &[&[VAULT_SEED, &[ctx.bumps.vault]]];
 
+        //invoke the cpi call to jupiter program 
         invoke_signed(
             &Instruction {
                 program_id: ctx.accounts.jupiter_program.key(),
@@ -68,6 +71,8 @@ pub mod jup_swap_program {
                 "To Recipient Token Address: {}",
                 &ctx.accounts.recipient_token_account.key()
             );
+         msg!("Vault PDA: {}", ctx.accounts.vault.key());
+         msg!("Vault Output Token Account Authority: {:?}", ctx.accounts.vault_output_token_account.owner);
 
         //Transfer swapped tokens to recipient 
         let decimals = ctx.accounts.output_mint.decimals;
@@ -116,7 +121,6 @@ pub struct Swap<'info> {
       associated_token::token_program=output_mint_token_program,
     )]
     pub vault_output_token_account: InterfaceAccount<'info, TokenAccount>,
-    #[account(mut)]
     #[account(
         mut,
         associated_token::mint=output_mint,

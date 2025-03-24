@@ -2,6 +2,7 @@ use anchor_lang::{prelude::*,solana_program::{instruction::Instruction, program:
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface, Transfer, transfer, TransferChecked, transfer_checked};
 use jupiter_aggregator::program::Jupiter;
 use std::str::FromStr;
+use anchor_spl::associated_token::AssociatedToken;
 
 declare_program!(jupiter_aggregator);
 declare_id!("HALaoXiDUqEvwCLdoxHRvsDmYJQ5djZH7MozvNwMhuGm");
@@ -129,5 +130,6 @@ pub struct Swap<'info> {
     )]
     pub recipient_token_account: InterfaceAccount<'info, TokenAccount>,
     pub recipient: SystemAccount<'info>, 
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub jupiter_program: Program<'info, Jupiter>,
 }

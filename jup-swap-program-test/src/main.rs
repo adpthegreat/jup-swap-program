@@ -1,7 +1,7 @@
 mod helpers;
 
 use tokio;
-use std::env;
+use std::{env,fs};
 use borsh::{BorshDeserialize, BorshSerialize};
 use {
     litesvm::LiteSVM,
@@ -36,8 +36,9 @@ const INPUT_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112"
 const INPUT_AMOUNT: u64 = 2_000_000;
 const OUTPUT_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 
-const CPI_SWAP_PROGRAM_ID: Pubkey = pubkey!("HALaoXiDUqEvwCLdoxHRvsDmYJQ5djZH7MozvNwMhuGm");
+const CPI_SWAP_PROGRAM_ID: Pubkey = pubkey!("LMMGrBSX84ZC519PSBkppyVdT4XfM3VP3hw4XLXqhrf");
 const JUPITER_V6_AGG_PROGRAM_ID: Pubkey = pubkey!("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
+const JUPITER_V6_PROGRAM_EXECUTABLE_DATA_ACCOUNT: Pubkey = pubkey!("4Ec7ZxZS6Sbdg5UGSLHbAnM7GQHp2eFd4KYWRexAipQT");
 const TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 
@@ -87,7 +88,7 @@ async fn main() {
 
     let balance = svm.get_balance(&vault).unwrap();
 
-    println!("this is the vault balance {}", balance);
+    println!("this is the vault {} balance {}", vault, balance);
 
     // - we're trying to use the response to get additional data and instructions to execute our swap
     // - if i use the vault pda (pubkey) i get a attempt to debit an account but found no record of a prior credit." prob because its not a mainnet keypair 
@@ -116,51 +117,37 @@ async fn main() {
     let output_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
     println!("Input Token Account: {}", input_token_account);
     println!("Output Token Account: {}", output_token_account);
+    // Read the base64 string from the file
+    let base64_string = fs::read_to_string("../JUP_V6_PROGRAM_DATA.txt").unwrap().trim().to_string(); 
+
+    // Decode the base64 string into bytes
+    let jup_v6_program_data_bytes = base64::decode(&base64_string).unwrap();
 
     let bytes = include_bytes!("../../jup-swap-program/target/deploy/jup_swap_program.so"); 
     svm.add_program(CPI_SWAP_PROGRAM_ID, bytes);
-
+    
+    //modify path 
     svm.add_program_from_file(JUPITER_V6_AGG_PROGRAM_ID, "../../jup-swap-program/program_bytes/jup_agg_v6.so"); //jup agg v6 dump dump with solana program dump command 
 
     let recipient = Keypair::new();
     let recipient_address = recipient.pubkey();
     println!("Recipient Address: {}", recipient_address);
 
-    let recipient_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
+    let recipient_token_account = get_associated_token_address(&recipient_address, &OUTPUT_MINT);
      
-    let create_input_ata_ix = create_associated_token_account_idempotent( 
-        &payer_address, 
-        &vault,
-        &INPUT_MINT,
-        &TOKEN_PROGRAM_ID,
-    );
-
-    let create_output_ata_ix = create_associated_token_account_idempotent(
-        &payer_address, 
-        &vault,
-        &OUTPUT_MINT,
-        &TOKEN_PROGRAM_ID,
-    );
-
-    let create_recipient_ata_ix = create_associated_token_account_idempotent(
-        &payer_address,
-        &recipient_address,
-        &OUTPUT_MINT,
-        &TOKEN_PROGRAM_ID,
-    );
-    
     let vault_input_token_acc = TokenAccount {
         mint: INPUT_MINT,
         owner: vault,
         amount: 0,
-        delegate: COption::None,
+        delegate: COption::None,  
         state: AccountState::Initialized,
         is_native: COption::None,
         delegated_amount: 0,
         close_authority: COption::None,
     };
+    println!("vault_input_token_acc owner: {}",vault_input_token_acc.owner);
 
-    let vault_output_token_acc = TokenAccount {
+    let vault_output_token_acc = TokenAccount { 
         mint: OUTPUT_MINT,
         owner: vault,
         amount: 0,
@@ -181,28 +168,32 @@ async fn main() {
         delegated_amount: 0,
         close_authority: COption::None,
     };
+    //
+    //  let mut token_acc_bytes = [0u8; TokenAccount::LEN];
+    let mut input_token_acc_bytes = [0u8; TokenAccount::LEN];
+    let mut output_token_acc_bytes = [0u8; TokenAccount::LEN];
+    let mut recipient_token_acc_bytes = [0u8; TokenAccount::LEN];   
 
-    let mut token_acc_bytes = [0u8; TokenAccount::LEN];
-     TokenAccount::pack(vault_input_token_acc , &mut token_acc_bytes).unwrap();
-     TokenAccount::pack(vault_output_token_acc , &mut token_acc_bytes).unwrap();
-     TokenAccount::pack(recipient_output_token_acc, &mut token_acc_bytes).unwrap();
-
-    svm.set_account(
-        input_token_account,
-        Account {
-            lamports: 1_000_000_000,
-            data: token_acc_bytes.to_vec(),
-            owner: TOKEN_PROGRAM_ID,
-            executable: false,
-            rent_epoch: 0,
-        },
-    )
-    .unwrap();
+     TokenAccount::pack(vault_input_token_acc , &mut input_token_acc_bytes).unwrap();
+     TokenAccount::pack(vault_output_token_acc , &mut output_token_acc_bytes).unwrap();
+     TokenAccount::pack(recipient_output_token_acc, &mut recipient_token_acc_bytes).unwrap();
+     svm.set_account(
+         input_token_account,
+         Account {
+             lamports: 0,
+             data: input_token_acc_bytes.to_vec(),
+             owner: TOKEN_PROGRAM_ID,
+             executable: false,
+             rent_epoch: 0,
+            },
+        )
+        .unwrap();
+         println!("vault_input_token_acc owner heereeeeee: {}",vault_input_token_acc.owner);
     svm.set_account(
         output_token_account,
         Account {
-            lamports: 1_000_000_000,
-            data: token_acc_bytes.to_vec(),
+            lamports: 0,
+            data: output_token_acc_bytes.to_vec(),
             owner: TOKEN_PROGRAM_ID,
             executable: false,
             rent_epoch: 0,
@@ -213,15 +204,63 @@ async fn main() {
     svm.set_account(
         recipient_token_account,
         Account {
-            lamports: 1_000_000_000,
-            data: token_acc_bytes.to_vec(),
+            lamports: 0,
+            data: recipient_token_acc_bytes.to_vec(),
             owner: TOKEN_PROGRAM_ID,
             executable: false,
             rent_epoch: 0,
         },
     )
     .unwrap();
-
+    //set the mints, initialize them
+    svm.set_account(
+        INPUT_MINT,
+        Account {
+            lamports: 1_017_845_286_023,
+            data: base64::decode("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==").unwrap(),
+            owner: TOKEN_PROGRAM_ID,
+            executable: false,
+            rent_epoch: std::u64::MAX,
+        }
+    )
+    .unwrap();
+    svm.set_account(
+        OUTPUT_MINT,
+        Account {
+            lamports: 387_385_103_258,
+            data: base64::decode("AQAAAJj+huiNm+Lqi8HMpIeLKYjCQPUrhCS/tA7Rot3LXhmbmio8hjXFIgAGAQEAAABicKqKWcWUBbRShshncubNEm6bil06OFNtN/e0FOi2Zw==").unwrap(), // empty data
+            owner: TOKEN_PROGRAM_ID,
+            executable: false,
+            rent_epoch: std::u64::MAX,
+        }
+    )
+    .unwrap();
+     //set the programdata_address of JUPITER_V6 or else we get an error 
+    //https://github.com/LiteSVM/litesvm/blob/c572f9091827692bb8776a8f54b82f1d02014e6e/crates/litesvm/src/accounts_db.rs#L255
+    //that is, the program data executable account
+    svm.set_account(
+        JUPITER_V6_PROGRAM_EXECUTABLE_DATA_ACCOUNT,
+        Account {
+            lamports: 20131083120,
+            data: jup_v6_program_data_bytes,
+            owner: pubkey!("BPFLoaderUpgradeab1e11111111111111111111111"),
+            executable: false,
+            rent_epoch: u64::MAX, // 18446744073709551615
+        }
+    )
+    .unwrap();
+    svm.set_account(
+        JUPITER_V6_AGG_PROGRAM_ID,
+        Account {
+            lamports: 1_141_440,
+            data: base64::decode("AgAAADAPUGBbvrcwh4nmwPvj5KNgIENvbqDK2oAmDbRv9mCE").unwrap(),
+            owner: pubkey!("BPFLoaderUpgradeab1e11111111111111111111111"),
+            executable: true,
+            rent_epoch: u64::MAX, // 18446744073709551615
+        }
+    )
+    .unwrap();
+   
     let instruction_data = SwapIxData {
         data: response.swap_instruction.data,
         amount: 10000 // any amount tbh
@@ -230,7 +269,7 @@ async fn main() {
     let mut serialized_data = Vec::from(get_discriminator("global:swap"));
     instruction_data.serialize(&mut serialized_data).unwrap();
     println!("Serialized Swap Instruction Data: {:?}", serialized_data);
-
+//it iterates through and tries to resolve all the accounts passed in the instruction
     let mut accounts = vec![
         AccountMeta::new_readonly(INPUT_MINT, false), // input mint
         AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false), // input mint program (for now, just hardcoded to SPL and not SPL 2022)
@@ -253,9 +292,6 @@ async fn main() {
 
     //Create the instruction
     let ixs = [
-        create_input_ata_ix,
-        create_output_ata_ix,
-        create_recipient_ata_ix,
         Instruction {
             program_id: CPI_SWAP_PROGRAM_ID,
             data: serialized_data,
@@ -277,34 +313,3 @@ async fn main() {
 }
 
 
-
-
-//with the ata creation ixs i get this error 
-// Starting Jupiter Swap...
-// Fetching quote...
-// Quote received successfully.
-// Payer Address: EbhvvChqxcW8Zwte7NEXhqMrAsFWZt8dTtZEMPjKyQ4i
-// this is the vault balance 1000000000
-// Vault: FmtgX2F84UJWc7icEwRhmTQQL119q69dVviCG8q2YUoQ
-// Input Token Account: Dhqb1fJ6wwVKzhHCcGZdihi4ciaicMTrJUk1VroJdhMW
-// Output Token Account: AMcGsR8qAWnndBWFKqQfitEeSNvRTrnKEwrKvcXyN6qj
-// Recipient Address: ApXeaiFKdeGGX4rj48noSgEmYR2RZUD8dTLtuXoVZZp
-// Serialized Swap Instruction Data: [248, 198, 158, 145, 225, 117, 135, 200, 42, 0, 0, 0, 193, 32, 155, 51, 65, 214, 156, 129, 6, 2, 0, 0, 0, 58, 1, 100, 0, 1, 58, 0, 100, 1, 2, 128, 132, 30, 0, 0, 0, 0, 0, 183, 88, 4, 0, 0, 0, 0, 0, 50, 0, 0, 16, 39, 0, 0, 0, 0, 0, 0]
-// Latest Blockhash: CmpNeggWJ4JaWJeJ8YKN1Zypmk7uvQq3PECGUCAEMbky
-// transaction failure FailedTransactionMetadata { err: InstructionError(0, IncorrectProgramId), meta: TransactionMetadata { signature: 2txtJGzMTVMTCkvBp4udrhV7eNiFVYdpjua7vTUptZGBPdVYWjLxmzWT7ZhHL33E7HMRmHhPAixp56BHU3demhWf, logs: ["Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]", "Program log: CreateIdempotent", "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]", "Program log: Instruction: GetAccountDataSize", "Program log: Error: IncorrectProgramId", "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 884 of 794518 compute units", "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA failed: incorrect program id for instruction", "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 6366 of 800000 compute units", "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL failed: incorrect program id for instruction"], inner_instructions: [[InnerInstruction { instruction: CompiledInstruction { program_id_index: 20, accounts: [18], data: [21, 7, 0] }, stack_height: 2 }]], compute_units_consumed: 6366, return_data: TransactionReturnData { program_id: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA, data: [] } } }
-
-
-//with the ata ix commented out, i get this error 
-
-// Starting Jupiter Swap...
-// Fetching quote...
-// Quote received successfully.
-// Payer Address: 9mTdF4i5v3BQdtjvZuEdSSXPRuPFzF6eqAyYcvjYiUJN
-// this is the vault balance 1000000000
-// Vault: FmtgX2F84UJWc7icEwRhmTQQL119q69dVviCG8q2YUoQ
-// Input Token Account: Dhqb1fJ6wwVKzhHCcGZdihi4ciaicMTrJUk1VroJdhMW
-// Output Token Account: AMcGsR8qAWnndBWFKqQfitEeSNvRTrnKEwrKvcXyN6qj
-// Recipient Address: 2cPGGPW4fzpHj1FwPJJHf2BRTkV5Q88zn4JX1oYv5D2V
-// Serialized Swap Instruction Data: [248, 198, 158, 145, 225, 117, 135, 200, 41, 0, 0, 0, 193, 32, 155, 51, 65, 214, 156, 129, 5, 2, 0, 0, 0, 25, 100, 0, 1, 61, 0, 100, 1, 2, 128, 132, 30, 0, 0, 0, 0, 0, 34, 91, 4, 0, 0, 0, 0, 0, 50, 0, 0, 16, 39, 0, 0, 0, 0, 0, 0]
-// Latest Blockhash: CmpNeggWJ4JaWJeJ8YKN1Zypmk7uvQq3PECGUCAEMbky
-// transaction failure FailedTransactionMetadata { err: InstructionError(0, Custom(0)), meta: TransactionMetadata { signature: MUMNfbXDyW3UuaDn8UHZcR67HiewrGqKJhBbkpLeXyv7rZxKt9ngFnTshhbhQP423pK7AFWMcJpdxQotjwE8jo6, logs: ["Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]", "Program log: CreateIdempotent", "Program log: Associated token account owner does not match address derivation", "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 4993 of 800000 compute units", "Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL failed: custom program error: 0x0"], inner_instructions: [[]], compute_units_consumed: 4993, return_data: TransactionReturnData { program_id: ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL, data: [] } } }

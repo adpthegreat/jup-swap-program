@@ -17,7 +17,6 @@ use {
     spl_associated_token_account::{
         ID as ATA_ID,
         get_associated_token_address,
-        instruction::create_associated_token_account_idempotent
     },
     spl_token::{
          state::{Account as TokenAccount, AccountState},
@@ -30,7 +29,7 @@ use jup_swap::{
     transaction_config::{DynamicSlippageSettings, TransactionConfig},
     JupiterSwapApiClient,
 };
-use crate::helpers::get_discriminator;
+use crate::helpers::{get_account_fields, get_discriminator};
 
 const INPUT_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 const INPUT_AMOUNT: u64 = 2_000_000;
@@ -95,11 +94,11 @@ async fn main() {
     // - but i still get the swap instructions and data though let me see what i can to 
     let response = jupiter_swap_api_client
         .swap_instructions(&SwapRequest {
-            user_public_key: vault,//pubkey!("Cd8JNmh6iBHJR2RXKJMLe5NRqYmpkYco7anoar1DWFyy"), 
+            user_public_key: payer_address, //pubkey!("Cd8JNmh6iBHJR2RXKJMLe5NRqYmpkYco7anoar1DWFyy"), //payer_address, 
             quote_response,
             config: TransactionConfig {
                 skip_user_accounts_rpc_calls: true,
-                wrap_and_unwrap_sol: false, //true 
+                wrap_and_unwrap_sol: false,
                 dynamic_compute_unit_limit: true,
                 dynamic_slippage: Some(DynamicSlippageSettings {
                     min_bps: Some(50),
@@ -111,17 +110,12 @@ async fn main() {
         .await
         .unwrap();
 
-    // println!("response {:?}", response);
+    println!("response {:?}", response);
     println!("Vault: {}", vault);
     let input_token_account = get_associated_token_address(&vault, &INPUT_MINT);
     let output_token_account = get_associated_token_address(&vault, &OUTPUT_MINT);
     println!("Input Token Account: {}", input_token_account);
     println!("Output Token Account: {}", output_token_account);
-    // Read the base64 string from the file
-    let base64_string = fs::read_to_string("../JUP_V6_PROGRAM_DATA.txt").unwrap().trim().to_string(); 
-
-    // Decode the base64 string into bytes
-    let jup_v6_program_data_bytes = base64::decode(&base64_string).unwrap();
 
     let bytes = include_bytes!("../../jup-swap-program/target/deploy/jup_swap_program.so"); 
     svm.add_program(CPI_SWAP_PROGRAM_ID, bytes);
@@ -168,7 +162,8 @@ async fn main() {
         delegated_amount: 0,
         close_authority: COption::None,
     };
-    //
+    // I used only one token_acc_bytes and shared it for the three accounts, an i was getting an account ownership error 2015 and the wrong owner ,
+    // was the recipient pubkey  because `TokenAccount::pack` packed it as the last data for the account 
     //  let mut token_acc_bytes = [0u8; TokenAccount::LEN];
     let mut input_token_acc_bytes = [0u8; TokenAccount::LEN];
     let mut output_token_acc_bytes = [0u8; TokenAccount::LEN];
@@ -228,7 +223,7 @@ async fn main() {
         OUTPUT_MINT,
         Account {
             lamports: 387_385_103_258,
-            data: base64::decode("AQAAAJj+huiNm+Lqi8HMpIeLKYjCQPUrhCS/tA7Rot3LXhmbmio8hjXFIgAGAQEAAABicKqKWcWUBbRShshncubNEm6bil06OFNtN/e0FOi2Zw==").unwrap(), // empty data
+            data: base64::decode("AQAAAJj+huiNm+Lqi8HMpIeLKYjCQPUrhCS/tA7Rot3LXhmbmio8hjXFIgAGAQEAAABicKqKWcWUBbRShshncubNEm6bil06OFNtN/e0FOi2Zw==").unwrap(), 
             owner: TOKEN_PROGRAM_ID,
             executable: false,
             rent_epoch: std::u64::MAX,
@@ -237,7 +232,12 @@ async fn main() {
     .unwrap();
      //set the programdata_address of JUPITER_V6 or else we get an error 
     //https://github.com/LiteSVM/litesvm/blob/c572f9091827692bb8776a8f54b82f1d02014e6e/crates/litesvm/src/accounts_db.rs#L255
-    //that is, the program data executable account
+    //that is, the program data executable account address
+    let jup_v6_program_data_bytes = get_account_fields("../JUP_V6_PROGRAM_DATA_ACCOUNT.json")
+                                    .unwrap()
+                                    .account
+                                    .data
+                                    .0;
     svm.set_account(
         JUPITER_V6_PROGRAM_EXECUTABLE_DATA_ACCOUNT,
         Account {
@@ -260,10 +260,11 @@ async fn main() {
         }
     )
     .unwrap();
-   
+
+    println!("Swap Instruction Data: {:?}", response.swap_instruction.data);
     let instruction_data = SwapIxData {
         data: response.swap_instruction.data,
-        amount: 10000 // any amount tbh
+        amount: 100 // any amount tbh
     };
 
     let mut serialized_data = Vec::from(get_discriminator("global:swap"));
@@ -294,8 +295,8 @@ async fn main() {
     let ixs = [
         Instruction {
             program_id: CPI_SWAP_PROGRAM_ID,
-            data: serialized_data,
             accounts: accounts,
+            data: serialized_data,
         }
     ];
     let blockhash = svm.latest_blockhash();

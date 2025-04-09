@@ -5,7 +5,7 @@ use std::str::FromStr;
 use anchor_spl::associated_token::AssociatedToken;
 
 declare_program!(jupiter_aggregator);
-declare_id!("HALaoXiDUqEvwCLdoxHRvsDmYJQ5djZH7MozvNwMhuGm");
+declare_id!("LMMGrBSX84ZC519PSBkppyVdT4XfM3VP3hw4XLXqhrf");
 
 //  - accepts a receiver pubkey and an amount u64
 //  - does the purchase of amount of some token on Jupiter
@@ -25,7 +25,7 @@ pub mod jup_swap_program {
         //validate jupiter program id
         require_keys_eq!(*ctx.accounts.jupiter_program.key, jupiter_program_id());
 
-        //Convert the reamaining accounts gotten from the jupiter swap api to Account Meta Objects
+        //Convert the remaining accounts gotten from the jupiter swap api to Account Meta Objects
         let accounts: Vec<AccountMeta> = ctx
             .remaining_accounts
             .iter()

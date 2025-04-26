@@ -308,12 +308,12 @@ async fn main() {
 
     if let Ok(tx_hash) = retryable_client.send_and_confirm_transaction(&tx).await {
         println!(
-            "Transaction confirmed",
+            "Transaction confirmed {}",
             tx_hash
         );
     } else {
         println!(
-            "Transaction failed",
+            "Transaction failed {}",
             tx_hash
         );
         return;

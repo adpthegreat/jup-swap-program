@@ -5,15 +5,19 @@ use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize, Deserializer};
 use serde::de::Error as DeError;
 use serde::de;
+use anyhow;
+use anyhow::bail;
 use base64::{decode, Engine};
 use base64::engine::general_purpose::STANDARD as base64_engine;
 use {
     solana_client::client_error::ClientError,
+    solana_client::rpc_request::RpcError,
     solana_client::rpc_client::RpcClient,
     solana_pubkey::{pubkey, Pubkey},
     solana_address_lookup_table_interface::state::AddressLookupTable,
     solana_message::{v0::Message, VersionedMessage, AddressLookupTableAccount}
 };
+use crate::retryable_rpc::MAX_RETRY_COUNT;
 
 // Function to generate Anchor's instruction discriminator
 pub fn get_discriminator(name: &str) -> [u8; 8] { 
@@ -26,6 +30,10 @@ pub fn get_discriminator(name: &str) -> [u8; 8] {
 }
 
 //function to get lookup table accounts 
+//i wanted to make a retry where i would retry each account fetching, but theres a possibility 
+// that some accounts can be gotten and some not, but we want all ALTs so that operation should 
+// be atomic and we'll go with the retry below 
+
 #[allow(dead_code)]
 pub async fn get_address_lookup_table_accounts(
     rpc_client: &Arc<RpcClient>,
@@ -45,6 +53,43 @@ pub async fn get_address_lookup_table_accounts(
     }
     Ok(accounts)
 }
+
+//function to get lookup table accounts with retry
+//will refactor this function to include the Vec<Alts> in the error 
+#[allow(dead_code)]
+pub async fn get_address_lookup_table_accounts_with_retry(
+    rpc_client: &Arc<RpcClient>,
+    addresses: Vec<Pubkey>,
+) -> Result<Vec<AddressLookupTableAccount>, ClientError> { //can change to ClientResult<Vec<AddressLookupTableAccount>>
+    let mut retry_count = 0;
+    'retry_loop: for retry_count in 0..MAX_RETRY_COUNT {
+        println!("Retry attempt #{}", retry_count + 1);
+        match get_address_lookup_table_accounts(&rpc_client, addresses.clone()).await {
+            Ok(accounts) => {
+                if accounts.is_empty() {
+                    println!("Received empty account list, retrying...");
+                    tokio::time::sleep(tokio::time::Duration::from_millis(5000)).await;
+                    continue 'retry_loop;
+                }
+                println!("Successfully retrieved {} accounts", accounts.len());
+                return Ok(accounts)
+            },
+            Err(err) => {
+                    println!("Error on attempt #{}: {:?}", retry_count + 1, err);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    continue 'retry_loop;
+            }
+        }
+    }
+    Err(RpcError::ForUser(
+        "Max retry count reached. \
+         Failed to get lookup table accounts"
+            .to_string(),
+    )
+    .into()) 
+} 
+
+
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AccountData {

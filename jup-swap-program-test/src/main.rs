@@ -4,11 +4,15 @@ mod debug;
 
 use tokio;
 use tokio::sync::RwLock;
+use tokio::net::TcpStream;
+use tokio::io::AsyncWriteExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use std::thread;
 use serde_json::{json, Value};
 use std::{env,fs};
+use bincode;
 use borsh::{BorshDeserialize, BorshSerialize};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use {
@@ -51,9 +55,8 @@ use jup_swap::{
     transaction_config::{DynamicSlippageSettings, TransactionConfig},
     JupiterSwapApiClient,
 };
-use crate::helpers::{get_account_fields, get_discriminator,get_address_lookup_table_accounts};
+use crate::helpers::{get_account_fields, get_discriminator,get_address_lookup_table_accounts,get_address_lookup_table_accounts_with_retry};
 use crate::debug::{serialize_and_encode, decode_and_deserialize,PACKET_DATA_SIZE};
-
 const INPUT_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 const INPUT_AMOUNT: u64 = 2_000_000;
 const OUTPUT_MINT: Pubkey = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
@@ -151,7 +154,7 @@ async fn main() {
     // - but i still get the swap instructions and data though let me see what i can to 
     let response = jupiter_swap_api_client
         .swap_instructions(&SwapRequest {
-            user_public_key: payer_address, //pubkey!("Cd8JNmh6iBHJR2RXKJMLe5NRqYmpkYco7anoar1DWFyy"), 
+            user_public_key: pubkey!("Cd8JNmh6iBHJR2RXKJMLe5NRqYmpkYco7anoar1DWFyy"),  //payer_address,
             quote_response,
             config: TransactionConfig {
                 skip_user_accounts_rpc_calls: true,
@@ -169,13 +172,13 @@ async fn main() {
         .unwrap();
 
     println!("response {:?}", &response);
-
+    
     let address_lookup_table_accounts =
-        get_address_lookup_table_accounts(&rpc_client, response.address_lookup_table_addresses)
-            .await
-            .unwrap();
-      
-    println!("address lookup table accounts: {:?}", address_lookup_table_accounts);
+    get_address_lookup_table_accounts_with_retry(&rpc_client, response.address_lookup_table_addresses)
+        .await
+        .unwrap();
+
+    // println!("address lookup table accounts: {:?}", address_lookup_table_accounts);
     println!("Vault: {}", vault);
     
     let recipient = Keypair::new();
@@ -216,7 +219,6 @@ async fn main() {
     instruction_data.serialize(&mut serialized_data).unwrap();
 
     println!("Serialized Swap Instruction Data: {:?}", serialized_data);
-//it iterates through and tries to resolve all the accounts passed in the instruction
     let mut accounts = vec![
         AccountMeta::new_readonly(INPUT_MINT, false), // input mint
         AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false), // input mint program (for now, just hardcoded to SPL and not SPL 2022)
@@ -272,76 +274,14 @@ async fn main() {
     
     let simulate_tx =
         VersionedTransaction::try_new(VersionedMessage::V0(simulate_message), &[&payer]).unwrap();
-        
+
+    assert!(simulate_tx.message.address_table_lookups().unwrap().len() > 0);
+
     println!("simulate_tx {:?}", &simulate_tx);
 
-    let serialized_encoded = serialize_and_encode(&simulate_tx, UiTransactionEncoding::Base64).unwrap();
-    //line 99 simnet mod 
-    
-    //based on this test i got from agave rpc.rs, we get this error if the packet_data_size is < 1232bytes?
-    // let tx_ser = vec![0xffu8; PACKET_DATA_SIZE - 2];
-    // let mut tx64 = STANDARD.encode(&tx_ser);
+    let serialized_encoded = serialize_and_encode::<VersionedTransaction>(&simulate_tx, UiTransactionEncoding::Base64).unwrap();
 
-    // assert_eq!(
-    //     decode_and_deserialize::<VersionedTransaction>(tx64.clone(), TransactionBinaryEncoding::Base64)
-    //         .unwrap_err(),
-    //     Error::invalid_params(
-    //         "failed to deserialize solana_transaction::versioned::VersionedTransaction: invalid value: \
-    //         continue signal on byte-three, expected a terminal signal on or before byte-three"
-    //             .to_string()
-    //     )
-    // );
-    
-    // let serialized_encoded = serialize_and_encode(&simulate_tx, UiTransactionEncoding::Base64).unwrap();
-    // let (wire_transaction, unsanitized_tx) =  decode_and_deserialize::<VersionedTransaction>(serialized_encoded,TransactionBinaryEncoding::Base64).unwrap();
 
-    // println!("this is the unsanitized tx {:?}", unsanitized_tx);
-    // println!("this is the vec len {:?}", wire_transaction.len());
-
-    // i think the error happens because its decoding it as a transaction and not a versioned txn internally 
-    // let simulated_cu = match rpc_client.simulate_transaction_with_config(
-    //     &simulate_tx,
-    //     RpcSimulateTransactionConfig {
-    //         replace_recent_blockhash: true,
-    //         encoding:Some(UiTransactionEncoding::Base64),
-    //         ..RpcSimulateTransactionConfig::default()
-    //     },
-    // ) {
-    //     Ok(simulate_result) => {
-    //         println!("simulate_result {:?}", simulate_result);
-    //         if simulate_result.value.err.is_some() {
-    //             let e = simulate_result.value.err.unwrap();
-    //             panic!(
-    //                 "Failed to simulate transaction due to {:?} logs:{:?}",
-    //                 e, simulate_result.value.logs
-    //             );
-    //         }
-    //         simulate_result.value.units_consumed.unwrap()
-    //     }
-    //     Err(e) => {
-    //         panic!("simulate failed: {e:#?}");
-    //     }  
-    // };
-    // in the documentation fo
-    //relevant issue:
-    // https://github.com/gagliardetto/solana-go/issues/173 //remove this 
-    let simulation_result = rpc_client.send::<VersionedTransaction>(
-        RpcRequest::SimulateTransaction,
-        json!([
-            serialized_encoded,
-            RpcSimulateTransactionConfig { //config
-                inner_instructions: true, 
-                encoding: Some(UiTransactionEncoding::Base64),
-                commitment: Some(CommitmentConfig::finalized()),
-                sig_verify:true,
-                replace_recent_blockhash: true,
-                accounts: None,
-                min_context_slot: None,
-            },
-        ]), 
-    );
-    println!("simulated_cu: {:?}", simulation_result);
-    
     let cu_ix = ComputeBudgetInstruction::set_compute_unit_limit((10_000) as u32);
 
     let recent_blockhash = latest_blockhash.blockhash.read().await;
@@ -360,18 +300,19 @@ async fn main() {
             .encode(VersionedMessage::V0(message.clone()).serialize())
     );
     let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &[&payer]).unwrap();
-    let retryable_client = retryable_rpc::RetryableRpcClient::new(&rpc_url);
 
     let tx_hash = tx.signatures[0];
+ 
+    let retryable_client = retryable_rpc::RetryableRpcClient::new(&rpc_url);
 
     if let Ok(tx_hash) = retryable_client.send_and_confirm_transaction(&tx).await {
         println!(
-            "Transaction confirmed {}",
+            "Transaction confirmed: https://explorer.solana.com/tx/{}",
             tx_hash
         );
     } else {
         println!(
-            "Transaction failed {}",
+            "Transaction failed: https://explorer.solana.com/tx/{}",
             tx_hash
         );
         return;

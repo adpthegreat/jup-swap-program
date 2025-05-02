@@ -152,3 +152,31 @@ where
 //   )
 
 // make sure we are getting the address lookup tables !!
+
+// other references
+// https://solana.com/developers/guides/advanced/lookup-tables#how-to-create-an-address-lookup-table
+//https://docs.anza.xyz/proposals/versioned-transactions
+
+//Sometimes it can throw addressLookupTableNotFound just ignore and run it again 
+
+
+    //based on this test i got from agave rpc.rs, we get this error if the packet_data_size is < 1232bytes?
+    // let tx_ser = vec![0xffu8; PACKET_DATA_SIZE - 2];
+    // let mut tx64 = STANDARD.encode(&tx_ser);
+
+// assert_eq!(
+//     decode_and_deserialize::<VersionedTransaction>(tx64.clone(), TransactionBinaryEncoding::Base64)
+//         .unwrap_err(),
+//     Error::invalid_params(
+//         "failed to deserialize solana_transaction::versioned::VersionedTransaction: invalid value: \
+//         continue signal on byte-three, expected a terminal signal on or before byte-three"
+//             .to_string()
+//     )
+// );
+
+// let serialized_encoded = serialize_and_encode(&simulate_tx, UiTransactionEncoding::Base64).unwrap();
+// let (wire_transaction, unsanitized_tx) =  decode_and_deserialize::<VersionedTransaction>(serialized_encoded,TransactionBinaryEncoding::Base64).unwrap();
+
+// println!("this is the unsanitized tx {:?}", unsanitized_tx);
+// println!("this is the vec len {:?}", wire_transaction.len());
+
